@@ -57,7 +57,7 @@ class GeminiTests(unittest.TestCase):
     def test_classification_is_unverified_and_abstains(self):
         data = {"classification": "likely_resin_bound", "visibility": "limited",
                 "observations": "A small surface", "limitations": "Too distant"}
-        client = self.client(json.dumps(data))
+        client = self.client(json.dumps({"driveways": [dict(data, detection_id="d1", box_2d=[100,100,500,500])], "scene_notes": "Synthetic street"}))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "image.jpg"
             path.write_bytes(b"\xff\xd8\xffsynthetic")
@@ -67,17 +67,43 @@ class GeminiTests(unittest.TestCase):
         self.assertFalse(result["address_verified"])
         body = json.loads(client.opener.open.call_args.args[0].data)
         self.assertEqual(body["generationConfig"]["responseMimeType"], "application/json")
+        self.assertIn("driveways",body["generationConfig"]["responseJsonSchema"]["properties"])
 
     def test_obscured_negative_is_unclear(self):
         data = {"classification": "other", "visibility": "limited",
                 "observations": "Car hides driveway", "limitations": "Insufficient texture"}
-        client = self.client(json.dumps(data))
+        client = self.client(json.dumps({"driveways": [dict(data, detection_id="d1", box_2d=[100,100,500,500])], "scene_notes": "Synthetic street"}))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "image.jpg"
             path.write_bytes(b"\xff\xd8\xffsynthetic")
             result = client.classify(path)
         self.assertEqual(result["classification"], "unclear")
         self.assertEqual(len(result["image_sha256"]), 64)
+
+    def test_invalid_boxes_and_duplicate_detections_rejected(self):
+        from driveway_poc.gemini import validate_driveways
+        item={"detection_id":"d1","box_2d":[100,100,500,500],"classification":"other", "visibility":"usable", "observations":"Blocks", "limitations":"Visual only"}
+        for box in [[0,0,0,10],[-1,0,100,100],[0,0,1001,100],[0,0,True,100],[0,0,10.5,100]]:
+            with self.assertRaises(ValueError):validate_driveways([dict(item,box_2d=box)])
+        with self.assertRaises(ValueError):validate_driveways([item,item])
+        self.assertEqual(validate_driveways([]),[])
+
+    def test_no_detections_are_not_a_negative_property_label(self):
+        client=self.client(json.dumps({"driveways":[],"scene_notes":"No visible driveway"}))
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"image.jpg";path.write_bytes(b"\xff\xd8\xffsynthetic")
+            result=client.classify(path)
+        self.assertEqual(result['classification'],'no_visible_driveway')
+        self.assertEqual(result['visibility'],'not_visible')
+        self.assertFalse(result['address_verified'])
+
+    def test_rejected_model_response_can_be_diagnosed_without_another_call(self):
+        client=self.client('{"driveways":[]}')
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"image.jpg";path.write_bytes(b"\xff\xd8\xffsynthetic")
+            with self.assertRaises(ApiError) as caught:client.classify(path)
+        self.assertEqual(caught.exception.raw_response,'{"driveways":[]}')
+        self.assertEqual(client.opener.open.call_count,1)
 
     def test_invalid_image_no_request(self):
         client = self.client()
@@ -117,6 +143,17 @@ class DownloadTests(unittest.TestCase):
             with self.assertRaises(ValueError): fetch_image(self.config(), "TOKEN", "123", directory)
         self.assertEqual(opener.open.call_count, 2)
 
+    def test_original_rendition_is_requested_explicitly(self):
+        metadata=self.metadata()
+        metadata['thumb_original_url']='https://scontent.example.fbcdn.net/original.jpg'
+        opener=Mock();opener.open.side_effect=[response(json.dumps(metadata).encode()),response(b"\xff\xd8\xffsynthetic")]
+        with tempfile.TemporaryDirectory() as directory,patch('driveway_poc.download.build_opener',return_value=opener):
+            result=fetch_image(self.config(),'TOKEN','123',directory,original=True)
+            self.assertEqual(json.loads(Path(result['metadata']).read_text())['rendition'],'thumb_original_url')
+        request=opener.open.call_args_list[0].args[0]
+        self.assertIn('thumb_original_url',request.full_url)
+        self.assertEqual(opener.open.call_args_list[1].args[0].full_url,'https://scontent.example.fbcdn.net/original.jpg')
+
     def test_unknown_bearing_is_not_a_direction(self):
         metadata = self.metadata()
         metadata["compass_angle"] = -1
@@ -155,3 +192,14 @@ class CommandTests(unittest.TestCase):
                 model.return_value.classify.side_effect = ApiError("synthetic failure")
                 self.assertEqual(main(['classify-image', 'image.jpg', '--output', str(path)]), 2)
             self.assertFalse(path.exists())
+
+    def test_rejected_inference_keeps_diagnostic_but_no_success_artifact(self):
+        from driveway_poc.__main__ import main
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'result.json'
+            error=ApiError('Synthetic rejection');error.raw_response='SYNTHETIC_REJECTED_JSON'
+            with patch('driveway_poc.__main__.load_config',return_value=self.config()),patch('driveway_poc.__main__.Gemini') as model,redirect_stderr(io.StringIO()):
+                model.return_value.classify.side_effect=error
+                self.assertEqual(main(['classify-image','image.jpg','--output',str(path)]),2)
+            self.assertFalse(path.exists())
+            self.assertEqual(path.with_suffix('.json.rejected.txt').read_text(),'SYNTHETIC_REJECTED_JSON')

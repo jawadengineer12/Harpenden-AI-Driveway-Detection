@@ -24,7 +24,7 @@ def connect(path, *, create=False):
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys = ON")
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version not in (0, 1):
+    if version not in (0, 1, 2, 3):
         db.close()
         raise ValueError("Unsupported database schema version")
     if version == 0 and db.execute("SELECT 1 FROM sqlite_master WHERE type='table'").fetchone():
@@ -64,8 +64,23 @@ def connect(path, *, create=False):
             finished_at TEXT, status TEXT NOT NULL,
             requests INTEGER NOT NULL DEFAULT 0, config TEXT NOT NULL
         );
-        PRAGMA user_version = 1;
+        CREATE TABLE IF NOT EXISTS classifications (
+            image_id TEXT PRIMARY KEY REFERENCES images(image_id),
+            image_sha256 TEXT NOT NULL, result TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS material_reviews (
+            property_id TEXT NOT NULL, image_id TEXT NOT NULL,
+            image_sha256 TEXT NOT NULL, driveway_class TEXT NOT NULL,
+            reviewer TEXT NOT NULL, reviewed_on TEXT NOT NULL, evidence TEXT NOT NULL,
+            PRIMARY KEY(property_id,image_id),
+            FOREIGN KEY(property_id,image_id) REFERENCES candidates(property_id,image_id)
+        );
+        PRAGMA user_version = 3;
     """)
+    if "detection_id" not in {row[1] for row in db.execute("PRAGMA table_info(material_reviews)")}:
+        db.execute("ALTER TABLE material_reviews ADD COLUMN detection_id TEXT NOT NULL DEFAULT ''")
+        db.commit()
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS material_review_detection ON material_reviews(image_id,detection_id) WHERE detection_id<>''")
     return db
 
 

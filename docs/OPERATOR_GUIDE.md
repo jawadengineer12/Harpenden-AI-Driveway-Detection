@@ -162,3 +162,45 @@ Real Mapillary image 1325329735432124 was downloaded with metadata, creator and 
 First image inference: 1,368 tokens; driveway partly hidden by car/shadows. Original model output other/limited was normalized to unclear by the visibility safeguard without rerunning inference. Raw result is preserved separately. No resin positive or property ownership has been established. OS address storage/export permissions remain unconfirmed in configuration. No OS requests were used for this change.
 
 Sources: https://ai.google.dev/gemini-api/docs/image-understanding and https://mapillary.github.io/mapillary-python-sdk/docs/mapillary.config.api/mapillary.config.api.entities/ .
+
+
+## Reviewed export stage (2026-10-14)
+
+The user confirmed OS local retention and client CSV export rights and accepted a 730-day maximum image age. These are recorded in ignored data/config.json. A ten-property convenience sample is frozen in data/poc.sqlite3; ten metadata searches completed with ten requests. Results are in outputs/pilot_delivery, and the offline evidence gallery is outputs/pilot_review.html. Zero eligible leads; human reviews remain outstanding.
+
+New commands, prefixed with uv run --no-sync --env-file .env python -m driveway_poc:
+
+~~~powershell
+lookup-addresses --longitude=-0.35 --latitude=51.82 --radius=100 --maxresults=10 --output outputs/NEW_addresses.json
+link-image PROPERTY_ID outputs/images/IMAGE_ID.json
+classify-image outputs/images/IMAGE_ID.jpg --output outputs/NEW_result.json
+import-classification IMAGE_ID outputs/NEW_result.json outputs/images/IMAGE_ID.jpg
+review-gallery --images outputs/images --output outputs/NEW_gallery.html
+review-template --output outputs/NEW_review.csv
+import-review outputs/EDITED_review.csv
+review-material PROPERTY_ID IMAGE_ID --class likely_resin_bound --reviewer "Actual reviewer" --date YYYY-MM-DD --evidence "Which driveway, visible surface evidence and remaining limitations"
+export-results --output outputs/NEW_delivery
+~~~
+
+Examples are placeholders: do not rerun paid calls just to regenerate existing outputs. Saved address JSON and classifications can be reused. Candidate coordinates are OS property coordinates, never camera coordinates. link-image creates no ownership approval. import-classification requires the image SHA-256 recorded in downloaded provenance and a prompt hash. Changed inference evidence clears associated material approvals. Material reviews and the pre-existing property/address review are separate requirements. When reviewing negatives/uncertainty, use other, unclear, or no_visible_driveway as appropriate. Unknown/unreviewed is never a negative by default.
+
+The exporter writes one QA row per sample property, including search status, classification availability and exclusion reasons. Header-only leads are valid. It requires all configured permissions and the image-age policy and rejects stale/future/unknown-date imagery, unreviewed/ambiguous/wrong property matches and unsupported panoramas. Keep UPRNs as text when importing the CSV into spreadsheets. Free text is formula-protected; numeric coordinates remain numeric text.
+
+The local gallery escapes address text and uses local downloaded images; it makes no API calls and has no hosted service. Model labels are collapsed so the reviewer can assess images before seeing them. The pilot uses one street and therefore does not meet the earlier five-reviewed-examples-across-two-streets feasibility criterion. Do not claim area-wide coverage or accuracy.
+
+
+## Per-driveway evidence (2026-10-14)
+
+This replaces the historical whole-image material workflow. classify-image now requests schema-constrained JSON with a driveways array, unique d1…d12 IDs and normalized [ymin,xmin,ymax,xmax] boxes. review-material now requires --detection-id d1. A review applies only to that selected region. Reusing the same detection for another property is rejected. Old whole-frame classifications remain historical context and cannot approve a property. Schema 1/2 upgrades to 3 without removing source records.
+
+Top-level classification is a scene summary. Never interpret a repeated frame as independent property classifications. QA now labels context_classified_images and selected_driveway_classes; summaries include unique_classified_images and properties_with_selected_driveways. Zero selected regions means zero properties individually classified/approved, even when an image is linked to several candidates.
+
+The gallery is image-first, so a shared photograph appears once. It overlays model boxes and lists unverified nearby addresses separately. It checks the displayed JPEG against the source SHA-256 and reports mismatches. --images must point to the directory holding the exact rendition used for inference.
+
+Use fetch-image IMAGE_ID --original --output outputs/SEPARATE_DIRECTORY only when a higher available rendition could help texture. The source may itself be low-resolution; this is not an upscaling guarantee. Raw validation failures can be retained in OUTPUT.json.rejected.txt with no successful result artifact and no automatic retry. Keep these local and untrusted.
+
+Live follow-up: 15 total candidate address records in two separate studies, ten original discovery candidates and five exploratory Hillside cases selected after imagery screening. This is not a representative 15-property accuracy evaluation. The original image produced one private-driveway box after the shared paved access was excluded. A closer Hillside image produced two distinct regions, both unclear due to cars. Another entrance was labelled other, with material/box uncertainty still requiring review. No human approvals or verified positives exist.
+
+Latest artifacts: outputs/pilot_review_v2.html, outputs/hillside_review_v2.html, outputs/pilot_delivery_v2 and outputs/hillside_delivery_v2. The original ten-property configuration/database remains data/config.json and data/poc.sqlite3. The separate Hillside case uses --config data/hillside_config.json --db data/hillside.sqlite3 before the command.
+
+Sources: https://ai.google.dev/gemini-api/docs/image-understanding (normalized detection boxes); https://ai.google.dev/gemini-api/docs/generate-content/structured-output (schema-constrained JSON); https://mapillary.github.io/mapillary-python-sdk/docs/mapillary.config.api/mapillary.config.api.entities/ (highest available thumbnail field).

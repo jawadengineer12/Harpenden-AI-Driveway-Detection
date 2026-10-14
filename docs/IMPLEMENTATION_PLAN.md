@@ -177,3 +177,19 @@ Verification: locally built and installed package; 32 offline tests passed again
 ### Verified integration progress — 2026-10-14
 
 Gemini generation and one real Mapillary street-image inference now pass. Reusable fetch-image, check-gemini and classify-image commands are implemented. Unknown Mapillary compass bearing (-1) is handled. 48 offline tests pass. First image is obstructed and recorded as unclear; no positive lead is claimed. Next: select usable existing views for the small Harpenden sample, establish address-use/export rights, verify driveway-to-property ownership, then complete reviewed lead export.
+
+
+### Reviewed export implementation — 2026-10-14
+
+The later progress entries supersede the historical initial-milestone status above. Address candidate retrieval, downloaded-image SHA-256 provenance, saved classification import, separate human material review, offline gallery and conservative leads/QA export are implemented. Runtime still uses the standard library; no SDK/Pillow dependency was needed for ordinary JPEG views. Schema 1 upgrades to 2 while preserving the sample and review history.
+
+User-confirmed: OS local retention/client CSV export; 730-day maximum image age. The live ten-property, single-street convenience sample completed metadata discovery using ten requests. One newly classified frame showed non-resin block paving. A QA export and header-only leads.csv were generated. Human property/material reviews, a real verified resin-positive, a second street and independent accuracy evidence remain pending. The full POC is not yet accepted as complete.
+
+63 offline tests cover the earlier integrations plus image/result binding, missing reviews, stale/future dates, every permission gate, changed-result invalidation, material conflicts, deduplication, safe CSV/gallery output and schema migration.
+
+
+### Per-driveway correction — 2026-10-14
+
+Whole-image material summaries no longer approve properties. Each detection has an ID and normalized box. Property material review must select a specific detection; duplicates across properties and legacy whole-frame approvals are blocked. The image-first gallery removes repeated photographs, verifies source hashes and shows tentative boxes. QA distinguishes shared context from selected per-property evidence. Schema 3 preserves historical records; 72 offline tests cover the updated behavior.
+
+Further live work: 14 additional street frames plus one highest-available rendition were retrieved through bounded exploratory checks. Three successful per-driveway inferences and one rejected response were initially attempted; a further entrance inference succeeded (four successful, one rejected total). Only one explicitly diagnosed retry was made, after adding JSON-schema constraints; there are no automatic inference retries. One OS request supplied five separate Hillside address candidates. No known resin-bound reference addresses are available from the user. The core code now represents the intended property-specific decision, but no real reviewed resin-positive has been established; the POC remains unaccepted. Continue discovery from existing imagery; do not substitute supplied/new photographs.

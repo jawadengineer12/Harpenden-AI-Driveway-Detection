@@ -1,5 +1,7 @@
 """Manual feasibility review and internal QA exports, never lead exports."""
 import csv
+import html
+import hashlib
 import json
 import os
 import tempfile
@@ -19,6 +21,8 @@ EDITABLE = ["visibility", "property_match", "address_verified", "reviewer", "rev
 
 def safe_cell(value):
     text = "" if value is None else str(value)
+    if type(value) in (int, float):
+        return text
     if text.lstrip().startswith(("=", "+", "-", "@")) or text.startswith(("\t", "\r", "\n")):
         return "'" + text
     return text
@@ -217,3 +221,39 @@ def report(db, config, output):
     finally:
         temporary.unlink(missing_ok=True)
     return summary
+
+
+def export_gallery(db, config, images_directory, output):
+    """Show each image once, with explicit unverified nearby address candidates."""
+    from .gemini import validate_driveways
+    require_permissions(config, "metadata_access", "address_use", "image_use", "image_storage")
+    check_study(db, config)
+    images_directory = Path(images_directory).resolve()
+    output = Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    sections, mismatched = [], []
+    for row in db.execute("SELECT i.image_id,i.metadata,k.result FROM images i LEFT JOIN classifications k USING(image_id) ORDER BY i.image_id"):
+        if not row["image_id"].isascii() or not row["image_id"].isdigit():
+            continue
+        path = images_directory / (row["image_id"] + ".jpg")
+        if not path.is_file():
+            continue
+        image = json.loads(row["metadata"])
+        if image.get("image_sha256") != hashlib.sha256(path.read_bytes()).hexdigest():
+            mismatched.append(row["image_id"])
+            continue
+        result = json.loads(row["result"]) if row["result"] else None
+        detections = validate_driveways(result["driveways"]) if result and "driveways" in result else []
+        boxes, suggestions = [], []
+        for detection in detections:
+            y1,x1,y2,x2 = detection["box_2d"]
+            boxes.append(f'<rect x="{x1}" y="{y1}" width="{x2-x1}" height="{y2-y1}" fill="none" stroke="#ffcc00" stroke-width="3"/><text x="{x1}" y="{max(20,y1-5)}" fill="#ffcc00" font-size="22" stroke="#111" stroke-width="0.5">{detection["detection_id"]}</text>')
+            suggestions.append('<li>' + html.escape(detection["detection_id"] + ': ' + detection["classification"] + ' — ' + detection["observations"] + ' Limitations: ' + detection["limitations"]) + '</li>')
+        addresses = [html.escape(p["property_address"] + ' (' + p["property_id"] + ')') for p in db.execute('SELECT p.property_id,p.property_address FROM candidates c JOIN properties p USING(property_id) WHERE c.image_id=? ORDER BY p.property_address',(row["image_id"],))]
+        source = html.escape(path.as_uri(), quote=True)
+        overlay = '<svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-label="Tentative driveway boxes">' + ''.join(boxes) + '</svg>' if boxes else ''
+        sections.append('<section><h2>Image ' + html.escape(row["image_id"]) + '</h2><p>Captured ' + html.escape(str(image.get("captured_at"))) + '</p><div class="view"><a href="' + source + '"><img loading="lazy" src="' + source + '" alt="Street image; property ownership unverified"></a>' + overlay + '</div><p>Nearby address candidates — none assigned to a box:</p><ul><li>' + '</li><li>'.join(addresses) + '</li></ul><details><summary>Model suggestions (optional)</summary><ul>' + (''.join(suggestions) or '<li>No per-driveway detections available</li>') + '</ul></details></section>')
+    content = '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Harpenden driveway evidence review</title><style>body{max-width:1100px;margin:24px auto;padding:0 16px;font:16px/1.5 system-ui;color:#18212b;background:#f5f6f8}section{background:white;padding:20px;margin:24px 0;border:1px solid #ddd}.view{position:relative}.view img{width:100%;height:auto;display:block}.view svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}h2{font-size:20px}summary{cursor:pointer}</style><h1>Driveway evidence review</h1><p>Each image appears once. Addresses listed below it are nearby candidates, not identified houses. Boxes and IDs describe separate model detections; verify each box, house number, boundary and driveway before selecting it for a property. Road/shared access is not evidence of an individual private driveway. Review unclear when texture or ownership cannot be established.</p>' + ''.join(sections) + '</html>'
+    with output.open("x", encoding="utf-8") as handle:
+        handle.write(content)
+    return {"properties": db.execute('SELECT COUNT(*) FROM properties').fetchone()[0], "downloaded_candidate_images": len(sections), "image_hash_mismatches": mismatched}

@@ -1,5 +1,6 @@
 """Retrieve one existing Mapillary image, preserving safe provenance."""
 import json
+import hashlib
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
@@ -9,7 +10,7 @@ from .config import require_permissions
 from .imagery import ApiError, NoRedirects, normalize_image
 
 
-def fetch_image(config, token, image_id, directory):
+def fetch_image(config, token, image_id, directory, *, original=False):
     require_permissions(config, "metadata_access", "image_use", "image_storage")
     if not config["client_owned_account"]:
         raise ValueError("Client-owned imagery account must be confirmed")
@@ -23,7 +24,8 @@ def fetch_image(config, token, image_id, directory):
     if image_path.exists() or metadata_path.exists():
         raise ValueError("Image/provenance already exists; reuse it or choose another directory")
     opener = build_opener(NoRedirects())
-    params = {"fields": "id,geometry,computed_geometry,captured_at,compass_angle,computed_compass_angle,is_pano,sequence,creator,thumb_2048_url"}
+    thumbnail_field = "thumb_original_url" if original else "thumb_2048_url"
+    params = {"fields": "id,geometry,computed_geometry,captured_at,compass_angle,computed_compass_angle,is_pano,sequence,creator," + thumbnail_field}
     request = Request("https://graph.mapillary.com/" + image_id + "?" + urlencode(params),
                       headers={"Authorization": "OAuth " + token})
     try:
@@ -36,7 +38,7 @@ def fetch_image(config, token, image_id, directory):
             metadata = normalize_image(item)
             if metadata["image_id"] != image_id:
                 raise ValueError()
-            url = item["thumb_2048_url"]
+            url = item[thumbnail_field]
             parsed = urlsplit(url)
             host = parsed.hostname or ""
             if parsed.scheme != "https" or not host.endswith(".fbcdn.net") or parsed.port not in (None, 443) or parsed.username or parsed.password:
@@ -57,7 +59,8 @@ def fetch_image(config, token, image_id, directory):
         raise ApiError("Mapillary image fetch network failure; no automatic retry") from None
     metadata.update(provider="Mapillary", image_file=image_path.name,
                     attribution="Mapillary / contributor; preserve provider reference and creator",
-                    requests=2, ownership_verified=False)
+                    requests=2, ownership_verified=False,
+                    image_sha256=hashlib.sha256(data).hexdigest(), rendition=thumbnail_field)
     with image_path.open("xb") as handle:
         handle.write(data)
     try:

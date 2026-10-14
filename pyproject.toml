@@ -1,0 +1,16 @@
+[project]
+name = "harpenden-driveway-poc"
+version = "0.1.0"
+description = "Existing street-imagery feasibility audit for the Harpenden POC"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+driveway-poc = "driveway_poc.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

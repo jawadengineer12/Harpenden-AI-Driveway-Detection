@@ -1,0 +1,55 @@
+{
+  "study": "Harpenden resin-bound POC",
+  "provider": "mapillary",
+  "bbox": null,
+  "max_properties": 20,
+  "search_radius_m": 50,
+  "max_requests": 60,
+  "max_pages_per_property": 3,
+  "max_image_age_days": null,
+  "client_owned_account": false,
+  "permissions": {
+    "metadata_access": {
+      "status": "unknown",
+      "evidence": "",
+      "reviewed_by": "",
+      "reviewed_on": ""
+    },
+    "address_use": {
+      "status": "unknown",
+      "evidence": "",
+      "reviewed_by": "",
+      "reviewed_on": ""
+    },
+    "image_use": {
+      "status": "unknown",
+      "evidence": "",
+      "reviewed_by": "",
+      "reviewed_on": ""
+    },
+    "image_storage": {
+      "status": "unknown",
+      "evidence": "",
+      "reviewed_by": "",
+      "reviewed_on": ""
+    },
+    "external_ai": {
+      "status": "unknown",
+      "evidence": "",
+      "reviewed_by": "",
+      "reviewed_on": ""
+    },
+    "derived_export": {
+      "status": "unknown",
+      "evidence": "",
+      "reviewed_by": "",
+      "reviewed_on": ""
+    },
+    "address_export": {
+      "status": "unknown",
+      "evidence": "",
+      "reviewed_by": "",
+      "reviewed_on": ""
+    }
+  }
+}

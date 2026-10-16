@@ -1,91 +1,205 @@
-# Harpenden driveway detection POC
+﻿# Harpenden driveway detection PoC
 
-Status: imagery discovery, bounded address lookup, image classification, human-review recording and leads/QA export are implemented. A live ten-property sample has completed metadata discovery and produced a QA export. Zero leads are eligible so far; human property/material review and a real positive example are pending.
+A local command-line tool for finding existing street imagery, suggesting driveway materials, reviewing the correct property/address, and exporting reviewed likely resin-bound leads. There is no hosted dashboard.
 
-Scope: 10-20 attempted Harpenden properties, resin-bound only, every result manually reviewed. Existing licensed street imagery is mandatory. Supplied or newly collected photos cannot replace discovery. If Mapillary fails, investigate another existing-imagery provider; if none is viable, report blocked.
+**Ready for client testing.** All 73 offline tests pass. Real-world resin accuracy remains unproven: the saved studies have no human approvals or eligible leads. Manual verification is part of this evaluation.
 
-## What runs now
+## 1. Install
 
-- Explicit permission/account readiness checks, without exposing credential values.
-- Validated, frozen property sample with optional UPRNs.
-- Bounded Mapillary metadata search with safe pagination, retries, deduplication, saved progress and request accounting.
-- Manual review template with provider links; validated review imports and revision history.
-- Internal feasibility.csv and summary.json that distinguish unsearched, missing, incomplete, unreviewed and reviewed cases.
+Use Windows PowerShell with Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/) installed. Obtain the repository as a ZIP or clone it with your own authorized GitHub account:
 
-Also available: bounded single-image downloading with provenance, Gemini connectivity checks and image classification, and an OS Places connectivity/normalization check. Nearby camera coordinates never automatically identify a property's driveway. Lead export requires a usable, fresh, human-reviewed likely-positive with an unambiguous verified address.
-
-Verification: 72 offline regression tests cover metadata, addresses, image download, Gemini and output safeguards. Tests make no API calls.
-
-## Run in this workspace
-
-A local virtual environment has been installed from a locally built wheel, without downloading dependencies. From PowerShell in this directory:
-
-~~~powershell
-./.venv/Scripts/python.exe -m driveway_poc --help
-./.venv/Scripts/python.exe -m driveway_poc --config config.example.json status
-./.venv/Scripts/python.exe -m unittest discover -s tests -v
-~~~
-
-The example configuration intentionally has no approved permissions, account, study boundary or freshness policy. Status works offline; live discovery is blocked.
-
-For normal development with package-index access:
-
-~~~powershell
+```powershell
+git clone https://github.com/jawadengineer12/Harpenden-AI-Driveway-Detection.git
+cd Harpenden-AI-Driveway-Detection
 uv sync --locked
-uv run driveway-poc --config config.example.json status
-uv run python -m unittest discover -s tests -v
-~~~
+uv run --no-sync python -m driveway_poc --help
+uv run --no-sync python -m unittest discover -s tests -v
+```
 
-Runtime uses only Python's standard library (Python 3.12+); setuptools is a build-time dependency. uv.lock is checked in. The current local wheel is a snapshot: source edits require reinstalling. See [operator guide](docs/OPERATOR_GUIDE.md) for the tested offline rebuild route and full workflow.
+For a ZIP, extract it and open PowerShell in the folder containing `pyproject.toml` instead of running the first two commands. Expected test result: `Ran 73 tests` and `OK`. Run all following commands from this folder.
 
-## Documents
+## 2. Choose your starting point
 
-- [Implementation plan and milestones](docs/IMPLEMENTATION_PLAN.md)
-- [Research and verification status](docs/RESEARCH.md)
-- [Client-owned setup checklist](docs/SETUP.md)
-- [Operator guide](docs/OPERATOR_GUIDE.md)
+**Review the prepared pilot first (recommended).** Ask us for the permitted handover data. A repository clone/ZIP does not include `data/`, `outputs/`, or `.env`: these are deliberately Git-ignored. The pilot handover needs:
 
-## Structure
+- `data/config.json` and `data/poc.sqlite3`: the frozen ten-property pilot.
+- `outputs/images/`: downloaded JPEGs and matching provenance JSON files.
+- Saved classification JSON files and `outputs/pilot_delivery_v2/` for reference.
 
-- src/driveway_poc/: config, SQLite storage, metadata discovery, review/report, CLI
-- tests/: synthetic offline regression tests; no real property claims
-- config.example.json: unapproved configuration template
-- examples/candidates.csv: input headers only
-- data/: ignored local configuration, licensed candidate records and SQLite state
-- outputs/: ignored internal reports and review sheets
-- chat.txt: original context, ignored by Git
+For the separate Hillside exploration, also obtain `data/hillside_config.json`, `data/hillside.sqlite3`, and the exact classified images in `outputs/hillside_evidence/`. Its five address candidates are exploratory, not five completed property discovery searches.
 
-Client-owned Mapillary, OS Places and Gemini credentials are configured locally; never commit .env or generated property evidence. The normal shell tool failed in this environment; local commands were run through the available Node runtime. The application does not depend on that runtime.
+Keep the folder structure. Regenerate galleries after moving the project: old galleries refer to image locations on the original computer. Transfer credentials separately through an agreed secure channel, never Git or chat.
 
-## Single-image integration
+**For a new property sample**, complete section 3, then follow section 5 before reviewing results.
 
-Run from the workspace root; uv loads client credentials without printing them:
+## 3. Local setup
 
-~~~powershell
-uv run --no-sync --env-file .env python -m driveway_poc check-gemini
-uv run --no-sync --env-file .env python -m driveway_poc fetch-image 1325329735432124 --output outputs/images
-uv run --no-sync --env-file .env python -m driveway_poc classify-image outputs/images/1325329735432124.jpg --output outputs/new_classification.json
-~~~
+Preserve handed-over files. Create a local credentials file only if missing:
 
-Each explicit check/classification uses one inference request and does not retry automatically. Fetching uses one metadata request plus one CDN request. Existing artifacts are protected from overwrite; reuse downloaded images. Image/storage/external-AI permission records must be approved. The sample image is already downloaded, so do not repeat its fetch.
+```powershell
+New-Item -ItemType Directory -Force data, outputs | Out-Null
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+```
 
-The working model is gemini-3.1-flash-lite. A listed older model returned 404 and gemini-3.8-flash returned 503 during diagnosis. The working inference used minimal thinking and a 55-second timeout. Responses must finish successfully and pass validation. Limited visibility normalizes positive/negative material suggestions to unclear. Every result requires manual review and remains address-unverified.
+For live requests, edit `.env` locally with client-controlled credentials:
 
-## Property sample, review and export
+```dotenv
+MAPILLARY_ACCESS_TOKEN=your_mapillary_access_token
+OS_PLACES_API_KEY=your_os_places_key
+GEMINI_API_KEY=your_gemini_key
+```
 
-The CLI also provides lookup-addresses (one bounded OS request, no ownership inference), link-image (provisional evidence only), import-classification (saved result must match source image and prompt hash), review-material (actual human decision), review-gallery, and export-results. Use --help for arguments.
+Mapillary supplies imagery, OS Places supplies address candidates, and Gemini classifies images. Keys can stay empty for review/export of existing downloaded and classified evidence. Python does not load `.env` itself; uv loads it in the commands below.
 
-1. Retrieve permitted address candidates with lookup-addresses; freeze a 10–20 property CSV with import-candidates.
-2. Run discover within the configured request budget. Use fetch-image for selected views, then link-image to attach downloaded provenance to an existing property.
-3. Run classify-image once per selected image. Import its saved result with import-classification; this step makes no inference call. Unchanged successful artifacts can be reused.
-4. Generate review-gallery and review-template. An actual reviewer checks visibility, property ownership and address, then import-review saves those decisions. Record the separate material decision with review-material --detection-id d1; select the actual box and describe the driveway in the evidence.
-5. Run export-results --output outputs/NEW_DIRECTORY. It creates leads.csv, qa.csv and summary.json. It never overwrites a previous delivery. Unreviewed, ambiguous, stale, unsupported panorama and non-positive cases stay out of leads. Multiple approved views yield one property row; conflicting material reviews block that property.
+Paste this helper once per PowerShell session to shorten the commands:
 
-SQLite schema 1/2 upgrades to 3 without discarding existing properties/reviews. Updated model/image evidence invalidates prior material approvals. Runtime remains standard-library only. No agent-generated visual observation is recorded as a human approval.
+```powershell
+function poc { uv run --no-sync --env-file .env python -m driveway_poc @args }
+poc status
+```
 
+By default, `poc` uses `data/config.json` and `data/poc.sqlite3`. `status` reports readiness and key presence, never key values, and makes no API calls. Missing keys are expected for offline review. If configuration has not been supplied, create a fresh study in section 5. To inspect the unapproved example instead, use `poc --config config.example.json status`.
 
-### Individual driveway results
+Configuration records the agreed area, client account ownership, image age, request budget and source-use permissions. The handed-over pilot uses a 730-day maximum image age. Approved permission records require actual evidence, reviewer and date; a working API key does not establish permission. Complete account setup together before the first live run; see [setup responsibilities](docs/SETUP.md).
 
-Gemini now returns a driveways list with separate IDs, normalized boxes [ymin,xmin,ymax,xmax] on a 0–1000 scale, labels and limitations. Output is constrained by a JSON schema and checked locally. The top-level classification remains a scene summary for historical compatibility; it is never a property material decision. review-material requires --detection-id. One detection cannot be assigned to two properties, and legacy whole-image results cannot approve a lead.
+## 4. Review the prepared pilot and export
 
-The gallery displays each image once, overlays tentative boxes and lists nearby addresses separately. QA distinguishes context_classified_images from selected_driveway_classes and summaries report unique classified images. Historic gallery/CSV files are preserved; use the latest versioned artifacts. fetch-image --original requests the highest available API rendition; use a separate directory to preserve prior evidence. Rejected inference may leave a .rejected.txt diagnostic but no successful result JSON. These are still untrusted suggestions requiring review.
+These commands use saved evidence and make no paid API calls. Use new output names on each run; existing galleries, review sheets and delivery directories are protected against overwrite.
+
+```powershell
+poc review-gallery --images outputs/images --output outputs/client_pilot_review.html
+poc review-template --output outputs/client_pilot_review.csv
+```
+
+Open `outputs/client_pilot_review.html` in your browser. Each image appears once, with tentative driveway boxes (`d1`, `d2`, etc.) and nearby address candidates. Assess the image before expanding the optional model suggestions. Nearby addresses are not verified house-to-driveway matches.
+
+Open `outputs/client_pilot_review.csv` in a CSV editor. In Excel, import image IDs and UPRNs as **text** so long identifiers are not rounded. Edit only these six columns:
+
+| Column | What to enter |
+|---|---|
+| `visibility` | `usable`, `obstructed`, `unclear`, or `not_visible` |
+| `property_match` | `verified`, `ambiguous`, or `wrong_property` |
+| `address_verified` | `yes` or `no` |
+| `reviewer` | Your name |
+| `reviewed_on` | Actual review date, `YYYY-MM-DD` |
+| `evidence` | Which driveway/property you checked and how you verified the address |
+
+Leave all six blank for pending rows; partial reviews are rejected. Preserve every other column and identifier. Save as UTF-8 CSV, then import:
+
+```powershell
+poc import-review outputs/client_pilot_review.csv
+```
+
+Record the **separate material decision** for each classified driveway you actually reviewed. Replace every uppercase placeholder below, including the detection ID. Do not enter a positive label unless the review supports it:
+
+```powershell
+poc review-material PROPERTY_ID IMAGE_ID --detection-id DETECTION_ID --class REVIEWED_CLASS --reviewer "YOUR NAME" --date YYYY-MM-DD --evidence "Describe the selected surface, material cues and uncertainty"
+```
+
+`REVIEWED_CLASS` is `likely_resin_bound`, `other`, `unclear`, or `no_visible_driveway`. Select a detection that exists in the saved classification. With no detection, there is no region to approve; leave the case excluded. One detection cannot be assigned to two properties. The scene-wide model summary never substitutes for selecting the correct driveway.
+
+Export after review, or earlier to inspect exclusion reasons:
+
+```powershell
+poc export-results --output outputs/client_delivery_01
+```
+
+| File | Meaning |
+|---|---|
+| `leads.csv` | Eligible reviewed likely resin-bound properties, one row each, with verified addresses |
+| `qa.csv` | Every candidate property, including missing evidence and exclusion reasons |
+| `summary.json` | Attempted, excluded and exported counts; accuracy limitations |
+
+**A header-only `leads.csv` is valid.** Unreviewed, ambiguous, stale, unknown-date, unsupported panorama and non-positive cases stay excluded. Current samples are expected to produce zero leads until adequate evidence and actual reviews exist. Visual assessment does not physically confirm the installed material.
+
+For Hillside, put its configuration/database options **before** each command:
+
+```powershell
+poc --config data/hillside_config.json --db data/hillside.sqlite3 review-gallery --images outputs/hillside_evidence --output outputs/client_hillside_review.html
+```
+
+Use those same options for its review-template, import-review, review-material and export-results commands. Keep the studies separate.
+
+## 5. Optional: run a new property sample
+
+This uses live services and may consume provider credits. Reuse successful artifacts rather than repeating requests. Existing licensed imagery is required; supplied/newly taken photos do not replace discovery in this PoC.
+
+Create a separate configuration so the original pilot stays intact:
+
+```powershell
+if (!(Test-Path data/client_config.json)) { Copy-Item config.example.json data/client_config.json }
+```
+
+Edit `data/client_config.json`: set the agreed `bbox` as `[west, south, east, north]`, `client_owned_account`, `max_image_age_days`, bounded `max_requests`, and the relevant permission records. Each approved record needs `evidence`, `reviewed_by` and `reviewed_on`. Lead export requires all seven permissions. Scope is 10-20 attempted properties; a 1-9 property smoke test is also accepted.
+
+Replace the helper so all following commands use a separate database:
+
+```powershell
+function poc { uv run --no-sync --env-file .env python -m driveway_poc --config data/client_config.json --db data/client.sqlite3 @args }
+poc status
+```
+
+Create `data/client_candidates.csv` using the headers in `examples/candidates.csv`:
+
+```csv
+property_id,street,latitude,longitude,property_address,postcode,property_uprn,address_source
+```
+
+Use permitted address records, unique property IDs and property coordinates within the configured area. UPRN is optional. Leads need a verified nonempty address, postcode and source. Detailed field rules are in the [operator guide](docs/OPERATOR_GUIDE.md#3-prepare-and-freeze-the-candidate-sample).
+
+If needed, retrieve address candidates with one bounded OS request (replace the coordinates with the agreed area):
+
+```powershell
+poc lookup-addresses --longitude=-0.35 --latitude=51.82 --radius=100 --maxresults=10 --output outputs/client_addresses.json
+```
+
+This saves JSON, not the import CSV. Select the agreed candidates and copy their fields into `data/client_candidates.csv`, adding stable property IDs. OS results do not verify driveway ownership.
+
+```powershell
+poc import-candidates data/client_candidates.csv
+poc discover
+poc review-template --output outputs/client_discovered_views.csv
+```
+
+The sample and search settings are now frozen. Use another database for a different sample/area. Discovery saves metadata and provider links, not JPEGs. Inspect permitted links and select useful views; do not classify every nearby road image.
+
+For each selected view, replace `IMAGE_ID` and `PROPERTY_ID` with actual IDs:
+
+```powershell
+poc fetch-image IMAGE_ID --output outputs/client_images
+poc link-image PROPERTY_ID outputs/client_images/IMAGE_ID.json
+poc classify-image outputs/client_images/IMAGE_ID.jpg --output outputs/client_IMAGE_ID_result.json
+poc import-classification IMAGE_ID outputs/client_IMAGE_ID_result.json outputs/client_images/IMAGE_ID.jpg
+poc review-gallery --images outputs/client_images --output outputs/client_new_sample_review.html
+poc review-template --output outputs/client_new_sample_review.csv
+```
+
+Fetch uses two HTTP requests; classification makes one inference request with no automatic retry. The configured model is `gemini-3.1-flash-lite`. Importing a saved result makes no new inference call. A timeout may still be billed. `max_requests` bounds discovery attempts per run, not total downloads, OS requests or Gemini spending.
+
+Continue with section 4's review/import/material/export steps using the new sample's CSV. Review all cases, including negatives and uncertainty. Missing imagery is not a negative material classification. If no useful view exists, keep the property in QA with its limitations.
+
+## Troubleshooting and feedback
+
+| Message/symptom | What to do |
+|---|---|
+| `uv` or Python not found | Install prerequisites, reopen PowerShell, rerun setup |
+| Missing config/database | Obtain handover data or create a fresh study in section 5 |
+| Missing key | Edit `.env` locally and use the `poc` helper to load it |
+| Permission not established | Resolve the named permission and record genuine approval evidence |
+| Existing output | Reuse the successful artifact or choose a new filename/directory |
+| Study settings changed | Restore frozen settings or use a new database for a new sample |
+| Empty gallery/hash mismatch | Use the exact classified rendition and regenerate after moving files |
+| HTTP/authentication/timeout error | Save the sanitized error and contact us before repeating potentially billed calls |
+| Empty leads | Read `qa.csv` exclusions; keep review requirements intact |
+
+Send us the command, sanitized error, expected versus actual result, and relevant property/image IDs through the agreed channel. Keep keys out of feedback. Review findings should identify the selected region and say whether material/address is verified or uncertain.
+
+## Technical reference
+
+Runtime uses Python's standard library, SQLite and CSV/JSON; `uv.lock` is included. The first client-machine installation still needs a guided check. Automated tests simulate providers and do not measure material accuracy.
+
+- [Operator guide](docs/OPERATOR_GUIDE.md): advanced details and historical progress. This README is the current client run sequence.
+- [Account setup checklist](docs/SETUP.md): account ownership and responsibilities, including historical planning notes.
+- [Implementation plan](docs/IMPLEMENTATION_PLAN.md) and [research](docs/RESEARCH.md): scope, acceptance criteria and earlier decisions.
+
+No hosting, model training or wider-area expansion is included. A successful evaluation needs usable existing imagery, human review and honest reporting of remaining gaps.

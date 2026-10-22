@@ -15,6 +15,9 @@ from .imagery import ApiError, discover
 from .review import export_review, import_review, report, export_gallery
 from .store import check_study, connect, import_candidates
 from .results import link_image, import_classification, review_material, export_results
+from .streetview import StreetView
+from . import streetview as streetview_module
+from .geocode import resolve_address
 
 
 def main(argv=None):
@@ -73,6 +76,24 @@ def main(argv=None):
     gallery = commands.add_parser("review-gallery", help="Generate an offline gallery of downloaded candidate views")
     gallery.add_argument("--images", default="outputs/images")
     gallery.add_argument("--output", required=True)
+    sv_check = commands.add_parser("check-streetview", help="One Street View metadata request; stores nothing")
+    sv_check.add_argument("--longitude", type=float, required=True)
+    sv_check.add_argument("--latitude", type=float, required=True)
+    sv_discovery = commands.add_parser("discover-streetview", help="Check panorama availability per property; never fetches pixels")
+    sv_discovery.add_argument("--retry-incomplete", action="store_true",
+                              help="Explicitly retry failed/limited properties using a new request budget")
+    sv_classify = commands.add_parser("classify-streetview", help="Fetch one Street View image at one heading, classify it, and save it under outputs/streetview_images")
+    sv_classify.add_argument("property_id")
+    sv_classify.add_argument("--heading", type=int, required=True, choices=range(360), metavar="0-359")
+    sv_classify.add_argument("--images", default=streetview_module.IMAGES_DIR)
+    sv_classify.add_argument("--no-save-image", action="store_true", help="Classify without writing the image to disk")
+    sv_scan = commands.add_parser("scan-streetview", help="Classify a property from 4 headings (toward it, away, and both sides) instead of guessing one angle")
+    sv_scan.add_argument("property_id")
+    sv_scan.add_argument("--images", default=streetview_module.IMAGES_DIR)
+    sv_scan.add_argument("--no-save-image", action="store_true", help="Classify without writing images to disk")
+    resolve = commands.add_parser("resolve-address", help="Geocode an address for Street View; address text first, postcode centroid as fallback; stores nothing")
+    resolve.add_argument("--address", required=True)
+    resolve.add_argument("--postcode", default=None)
     args = parser.parse_args(argv)
     try:
         config = load_config(args.config)
@@ -128,6 +149,18 @@ def main(argv=None):
                     raise
             print(json.dumps(result, indent=2))
             return 0
+        if args.command == "check-streetview":
+            client = StreetView(os.environ.get("STREET_VIEW_API"), 1)
+            payload = client.metadata(args.latitude, args.longitude)
+            print(json.dumps({"provider": "Google Street View", "status": payload.get("status"),
+                              "requests": client.requests, "panorama_available": payload.get("status") == "OK"}))
+            return 0
+        if args.command == "resolve-address":
+            latitude, longitude, meta, method = resolve_address(
+                os.environ.get("STREET_VIEW_API"), args.address, args.postcode)
+            print(json.dumps({"latitude": latitude, "longitude": longitude, "method": method,
+                              "pano_id": meta["pano_id"], "captured_at": meta["captured_at"]}, indent=2))
+            return 0
         if args.command == "check-os":
             client = OSPlaces(os.environ.get("OS_PLACES_API_KEY"))
             candidates = client.radius(args.longitude, args.latitude)
@@ -142,6 +175,7 @@ def main(argv=None):
                 "study_area_set": config["bbox"] is not None,
                 "client_owned_account": config["client_owned_account"],
                 "mapillary_token_present": bool(os.environ.get("MAPILLARY_ACCESS_TOKEN")),
+                "street_view_key_present": bool(os.environ.get("STREET_VIEW_API")),
                 "os_places_key_present": bool(os.environ.get("OS_PLACES_API_KEY")),
                 "gemini_key_present": bool(os.environ.get("GEMINI_API_KEY")),
                 "permissions": {scope: config["permissions"][scope]["status"] for scope in PERMISSIONS},
@@ -168,6 +202,26 @@ def main(argv=None):
                 run = discover(db, config, os.environ.get("MAPILLARY_ACCESS_TOKEN"),
                                retry_incomplete=args.retry_incomplete)
                 print(f"Metadata run {run} saved. Use report to inspect completeness and blockers.")
+            elif args.command == "discover-streetview":
+                run = streetview_module.discover(db, config, os.environ.get("STREET_VIEW_API"),
+                                                 retry_incomplete=args.retry_incomplete)
+                print(f"Metadata run {run} saved. Use report to inspect completeness and blockers.")
+            elif args.command == "classify-streetview":
+                images_dir = None if args.no_save_image else args.images
+                view_id, label, image_file = streetview_module.fetch_and_classify(
+                    db, config, os.environ.get("STREET_VIEW_API"),
+                    Gemini(os.environ.get("GEMINI_API_KEY")), args.property_id, args.heading,
+                    images_dir=images_dir)
+                print(json.dumps({"image_id": view_id, "classification": label,
+                                  "human_review_required": True, "image_file": image_file}))
+            elif args.command == "scan-streetview":
+                images_dir = None if args.no_save_image else args.images
+                views = streetview_module.scan_and_classify(
+                    db, config, os.environ.get("STREET_VIEW_API"),
+                    Gemini(os.environ.get("GEMINI_API_KEY"), limit=4), args.property_id, images_dir=images_dir)
+                labels = {v["classification"] for v in views if v["classification"]}
+                print(json.dumps({"views": views, "human_review_required": True,
+                                  "headings_disagree": len(labels) > 1}, indent=2))
             elif args.command == "review-gallery":
                 print(json.dumps(export_gallery(db, config, args.images, args.output), indent=2))
             elif args.command == "review-template":

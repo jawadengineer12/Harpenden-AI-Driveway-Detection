@@ -233,12 +233,14 @@ def export_gallery(db, config, images_directory, output):
     output.parent.mkdir(parents=True, exist_ok=True)
     sections, mismatched = [], []
     for row in db.execute("SELECT i.image_id,i.metadata,k.result FROM images i LEFT JOIN classifications k USING(image_id) ORDER BY i.image_id"):
-        if not row["image_id"].isascii() or not row["image_id"].isdigit():
+        image = json.loads(row["metadata"])
+        filename = Path(image["image_file"]).name if image.get("image_file") else (
+            row["image_id"] + ".jpg" if row["image_id"].isascii() and row["image_id"].isdigit() else None)
+        if not filename:
             continue
-        path = images_directory / (row["image_id"] + ".jpg")
+        path = images_directory / filename
         if not path.is_file():
             continue
-        image = json.loads(row["metadata"])
         if image.get("image_sha256") != hashlib.sha256(path.read_bytes()).hexdigest():
             mismatched.append(row["image_id"])
             continue

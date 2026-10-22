@@ -2,6 +2,8 @@
 
 Status: user authorized implementation; local feasibility tooling is ready and client-owned access is next. No accounts created, messages sent, terms accepted or purchases made.
 
+**2026-10-22 update:** the client's own Google Cloud project (Street View Static API, billing enabled) is also now wired in as a second imagery provider, alongside Mapillary — see `docs/OPERATOR_GUIDE.md`'s "Street View provider" section. This was an explicit project-owner decision to proceed for the non-commercial PoC stage and defer the Street View Static API's content-storage/third-party-AI terms to a later licensing review, not a confirmation that the full workflow is covered by Google's terms. Treat that review as outstanding before any client-facing or commercial scale-up.
+
 ## Responsibility
 
 We handle technical configuration and testing. Client retains ownership, recovery methods and billing; completes required identity/phone checks, service acceptance and payment entry. Use delegated access where supported. Do not use developer-owned paid accounts, share passwords or paste keys into chat/source control.

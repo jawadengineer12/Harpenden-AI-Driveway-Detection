@@ -2,7 +2,7 @@
 
 A local command-line tool for finding existing street imagery, suggesting driveway materials, reviewing the correct property/address, and exporting reviewed likely resin-bound leads. There is no hosted dashboard.
 
-**Ready for client testing.** All 73 offline tests pass. Real-world resin accuracy remains unproven: the saved studies have no human approvals or eligible leads. Manual verification is part of this evaluation.
+**Ready for client testing.** All 97 offline tests pass. Real-world resin accuracy remains unproven: the saved studies have no human approvals or eligible leads. Manual verification is part of this evaluation.
 
 ## 1. Install
 
@@ -16,7 +16,7 @@ uv run --no-sync python -m driveway_poc --help
 uv run --no-sync python -m unittest discover -s tests -v
 ```
 
-For a ZIP, extract it and open PowerShell in the folder containing `pyproject.toml` instead of running the first two commands. Expected test result: `Ran 73 tests` and `OK`. Run all following commands from this folder.
+For a ZIP, extract it and open PowerShell in the folder containing `pyproject.toml` instead of running the first two commands. Expected test result: `Ran 97 tests` and `OK`. Run all following commands from this folder.
 
 ## 2. Choose your starting point
 
@@ -47,9 +47,10 @@ For live requests, edit `.env` locally with client-controlled credentials:
 MAPILLARY_ACCESS_TOKEN=your_mapillary_access_token
 OS_PLACES_API_KEY=your_os_places_key
 GEMINI_API_KEY=your_gemini_key
+STREET_VIEW_API=your_google_street_view_static_api_key
 ```
 
-Mapillary supplies imagery, OS Places supplies address candidates, and Gemini classifies images. Keys can stay empty for review/export of existing downloaded and classified evidence. Python does not load `.env` itself; uv loads it in the commands below.
+Mapillary or Google Street View supplies imagery (two interchangeable providers, see section 6), OS Places supplies address candidates, and Gemini classifies images. Keys can stay empty for review/export of existing downloaded and classified evidence. Python does not load `.env` itself; uv loads it in the commands below.
 
 Paste this helper once per PowerShell session to shorten the commands:
 
@@ -177,6 +178,47 @@ poc review-template --output outputs/client_new_sample_review.csv
 Fetch uses two HTTP requests; classification makes one inference request with no automatic retry. The configured model is `gemini-3.1-flash-lite`. Importing a saved result makes no new inference call. A timeout may still be billed. `max_requests` bounds discovery attempts per run, not total downloads, OS requests or Gemini spending.
 
 Continue with section 4's review/import/material/export steps using the new sample's CSV. Review all cases, including negatives and uncertainty. Missing imagery is not a negative material classification. If no useful view exists, keep the property in QA with its limitations.
+
+## 6. Street View provider (second imagery source)
+
+Google Street View is available as an alternative to Mapillary when Mapillary has no coverage near a property. It is a **separate config/database pair** (`data/streetview_config.json`), so it never mixes with or overwrites the Mapillary pilot.
+
+**Known accepted risk:** Google's Street View Static API policy generally prohibits pre-fetching, storing or caching panorama content, and does not explicitly cover sending imagery to a third-party AI model. Using it this way, for this non-commercial PoC, was an explicit owner decision to proceed and defer a full licensing review — recorded in `data/streetview_config.json`'s permission evidence. **Revisit this before any client-facing or commercial scale-up.**
+
+```powershell
+function poc-sv { uv run --no-sync --env-file .env python -m driveway_poc --config data/streetview_config.json --db data/streetview_poc.sqlite3 @args }
+poc-sv status
+```
+
+**Resolving an address to coordinates.** Street View needs a point, not a street name. `resolve-address` tries the address text first; if Google's geocoder can't place it (a common, often transient `UNKNOWN_ERROR`/`ZERO_RESULTS`), it automatically falls back to the postcode's centroid (via the free, open `postcodes.io` dataset) and retries there. It makes no database changes — copy the printed `latitude`/`longitude` into your candidates CSV yourself.
+
+```powershell
+poc-sv resolve-address --address "33 The Uplands" --postcode "AL5 2PA"
+```
+
+If it still fails, retry once or twice — Google's own geocoder is sometimes flakier than the underlying imagery coverage.
+
+**Running the sample**, same `property_id`/`street`/`latitude`/`longitude`/`property_address`/`postcode`/`property_uprn`/`address_source` CSV shape as section 5:
+
+```powershell
+poc-sv import-candidates data/streetview_candidates.csv
+poc-sv discover-streetview
+poc-sv classify-streetview PROPERTY_ID --heading 180
+```
+
+`discover-streetview` only checks panorama availability (one small metadata request per property; no pixels fetched). A single angle frequently misses the actual driveway (facing a hedge, the road, or a neighbour's drive), so prefer:
+
+```powershell
+poc-sv scan-streetview PROPERTY_ID
+```
+
+This classifies the property from **four** headings — toward it (computed from the camera's bearing to the property coordinates), the opposite side (the camera may be across the road), and both perpendiculars (corner plots, side-on driveways) — rather than guessing. It costs 4 Gemini calls instead of 1. A failure on one heading (timeout, transient 503) is recorded, not fatal to the others; rerun just that heading with `classify-streetview PROPERTY_ID --heading N` to fill a gap (it is safe to rerun — it won't overwrite an image already saved for that heading).
+
+For a single specific angle instead: `classify-streetview PROPERTY_ID --heading 0-359`. Either command **saves the image** under `outputs/streetview_images/<address>_h<heading>.jpg`; pass `--no-save-image` to skip saving for a given call. Neither will silently overwrite an existing file for the same address/heading.
+
+Even with four angles, treat every result as a lead to manually verify, not a settled answer — the model has given different answers for the same scene on different calls.
+
+Continue with section 4's review/import/material/export steps, pointed at `data/streetview_config.json`/`data/streetview_poc.sqlite3`, to get `leads.csv`/`qa.csv`. The model is not perfectly consistent between calls on the same scene — treat every positive as a lead to manually verify, never as settled.
 
 ## Troubleshooting and feedback
 

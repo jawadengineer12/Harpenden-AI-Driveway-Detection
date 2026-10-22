@@ -20,8 +20,8 @@ def number(value, low, high, name):
 
 def load_config(path):
     config = json.loads(Path(path).read_text(encoding="utf-8-sig"))
-    if not isinstance(config, dict) or config.get("provider") != "mapillary":
-        raise ValueError("This milestone supports the existing Mapillary provider only")
+    if not isinstance(config, dict) or config.get("provider") not in ("mapillary", "streetview"):
+        raise ValueError("provider must be 'mapillary' or 'streetview'")
     if not isinstance(config.get("study"), str) or not config["study"].strip():
         raise ValueError("study is required")
     for name, low, high in (

@@ -196,7 +196,7 @@ def export_results(db, config, output):
             leads.append({"property_uprn": prop["property_uprn"], "property_address": prop["property_address"],
                           "postcode": prop["postcode"], "latitude": prop["latitude"], "longitude": prop["longitude"],
                           "driveway_class": "likely_resin_bound", "model_score": "", "human_review": "reviewed_likely_resin_bound",
-                          "address_match_status": "verified", "imagery_provider": "Mapillary",
+                          "address_match_status": "verified", "imagery_provider": image.get("provider", "Mapillary"),
                           "imagery_date": image["captured_at"], "imagery_reference": image["reference"],
                           "notes": "Driveway " + pair["detection_id"] + " box " + json.dumps(next(d["box_2d"] for d in json.loads(pair["result"])["driveways"] if d["detection_id"] == pair["detection_id"])) + "; " + pair["material_evidence"] + "; visual assessment, not physical material confirmation"})
         if not pairs: reasons.add("no_candidate_images")

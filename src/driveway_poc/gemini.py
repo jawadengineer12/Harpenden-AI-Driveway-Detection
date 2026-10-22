@@ -143,6 +143,9 @@ class Gemini:
     def classify(self, path):
         with Path(path).open("rb") as image:
             data = image.read(8_000_001)
+        return self.classify_bytes(data)
+
+    def classify_bytes(self, data):
         if not data or len(data) > 8_000_000:
             raise ValueError("Image must be nonempty and at most 8 MB")
         if data.startswith(b"\xff\xd8\xff"):
